@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -212,22 +211,11 @@ storage_destination "dest_type2" {
 		syncPool := physical.NewPermitPool(1)
 
 		maxParallel := "10"
-		messages := make(chan string)
-		i, _ := strconv.Atoi(maxParallel)
-		permitPool := physical.NewPermitPool(i)
-
 		dfsScan(context.Background(), l, maxParallel, func(ctx context.Context, path string) error {
-
-			permitPool.Acquire()
-			go func() {
-				defer permitPool.Release()
-				messages <- path
-			}()
-
 			syncPool.Acquire()
 			defer syncPool.Release()
-			msg := <-messages
-			out = append(out, msg)
+			out = append(out, path)
+
 			return nil
 		})
 
