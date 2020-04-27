@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -55,11 +56,11 @@ func TestMigration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
+		maxParallel := "10"
 		cmd := OperatorMigrateCommand{
 			logger: log.NewNullLogger(),
 		}
-		if err := cmd.migrateAll(context.Background(), from, to); err != nil {
+		if err := cmd.migrateAll(context.Background(), from, to, maxParallel); err != nil {
 			t.Fatal(err)
 		}
 
@@ -92,6 +93,7 @@ func TestMigration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		maxParallel := "10"
 
 		const start = "m"
 
@@ -99,7 +101,7 @@ func TestMigration(t *testing.T) {
 			logger:    log.NewNullLogger(),
 			flagStart: start,
 		}
-		if err := cmd.migrateAll(context.Background(), from, to); err != nil {
+		if err := cmd.migrateAll(context.Background(), from, to, maxParallel); err != nil {
 			t.Fatal(err)
 		}
 
@@ -206,8 +208,26 @@ storage_destination "dest_type2" {
 		l := randomLister{s}
 
 		var out []string
-		dfsScan(context.Background(), l, func(ctx context.Context, path string) error {
-			out = append(out, path)
+
+		syncPool := physical.NewPermitPool(1)
+
+		maxParallel := "10"
+		messages := make(chan string)
+		i, _ := strconv.Atoi(maxParallel)
+		permitPool := physical.NewPermitPool(i)
+
+		dfsScan(context.Background(), l, maxParallel, func(ctx context.Context, path string) error {
+
+			permitPool.Acquire()
+			go func() {
+				defer permitPool.Release()
+				messages <- path
+			}()
+
+			syncPool.Acquire()
+			defer syncPool.Release()
+			msg := <-messages
+			out = append(out, msg)
 			return nil
 		})
 
@@ -219,6 +239,7 @@ storage_destination "dest_type2" {
 			keys = append(keys, key)
 		}
 		sort.Strings(keys)
+		sort.Strings(out)
 		if !reflect.DeepEqual(keys, out) {
 			t.Fatalf("expected equal: %v, %v", keys, out)
 		}
