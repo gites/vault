@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -206,16 +207,16 @@ storage_destination "dest_type2" {
 
 		l := randomLister{s}
 
-		var out []string
-
-		syncPool := physical.NewPermitPool(1)
-
+		type SafeAppend struct {
+			out []string
+			mux sync.Mutex
+		}
+		var outKeys = SafeAppend{}
 		maxParallel := "10"
 		dfsScan(context.Background(), l, maxParallel, func(ctx context.Context, path string) error {
-			syncPool.Acquire()
-			defer syncPool.Release()
-			out = append(out, path)
-
+			outKeys.mux.Lock()
+			outKeys.out = append(outKeys.out, path)
+			outKeys.mux.Unlock()
 			return nil
 		})
 
@@ -227,9 +228,11 @@ storage_destination "dest_type2" {
 			keys = append(keys, key)
 		}
 		sort.Strings(keys)
-		sort.Strings(out)
-		if !reflect.DeepEqual(keys, out) {
-			t.Fatalf("expected equal: %v, %v", keys, out)
+		outKeys.mux.Lock()
+		sort.Strings(outKeys.out)
+		outKeys.mux.Unlock()
+		if !reflect.DeepEqual(keys, outKeys.out) {
+			t.Fatalf("expected equal: %v, %v", keys, outKeys.out)
 		}
 	})
 }
